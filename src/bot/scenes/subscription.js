@@ -1,4 +1,5 @@
 import { Scenes } from 'telegraf';
+import messageManager from '../utils/messageManager.js';
 
 const subscriptionScene = new Scenes.BaseScene('subscription');
 

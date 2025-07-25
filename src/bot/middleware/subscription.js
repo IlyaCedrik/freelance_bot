@@ -1,5 +1,6 @@
 import Subscription from '../../database/models/Subscription.js';
 import User from '../../database/models/User.js';
+import messageManager from '../utils/messageManager.js';
 
 const subscriptionMiddleware = (requiredCategoryId = null) => {
   return async (ctx, next) => {
@@ -7,14 +8,14 @@ const subscriptionMiddleware = (requiredCategoryId = null) => {
       const user = await User.findByTelegramId(ctx.from.id);
       
       if (!user) {
-        return ctx.reply('❌ Пользователь не найден. Используйте /start');
+        return messageManager.sendMessage(ctx, '❌ Пользователь не найден. Используйте /start');
       }
 
       if (requiredCategoryId) {
         const isSubscribed = await Subscription.isUserSubscribed(user.id, requiredCategoryId);
         
         if (!isSubscribed) {
-          return ctx.reply('⚠️ У вас нет активной подписки на эту категорию');
+          return messageManager.sendMessage(ctx, '⚠️ У вас нет активной подписки на эту категорию');
         }
       }
 
@@ -22,7 +23,7 @@ const subscriptionMiddleware = (requiredCategoryId = null) => {
       return next();
     } catch (error) {
       console.error('Subscription middleware error:', error);
-      return ctx.reply('❌ Ошибка при проверке подписки');
+      return messageManager.sendMessage(ctx, '❌ Ошибка при проверке подписки');
     }
   };
 };

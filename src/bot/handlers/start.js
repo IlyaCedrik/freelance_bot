@@ -1,5 +1,6 @@
 import User from '../../database/models/User.js';
 import { mainKeyboard } from '../keyboards/main.js';
+import messageManager from '../utils/messageManager.js';
 
 const startHandler = async (ctx) => {
   try {
@@ -33,10 +34,17 @@ const startHandler = async (ctx) => {
 Выберите действие:
     `;
 
-    await ctx.reply(welcomeMessage, mainKeyboard);
+    // Проверяем, является ли это callback query (нажатие кнопки)
+    if (ctx.callbackQuery) {
+      // Если это callback, используем editMessage
+      await messageManager.editMessage(ctx, welcomeMessage, mainKeyboard);
+    } else {
+      // Если это команда /start, используем sendMessage
+      await messageManager.sendMessage(ctx, welcomeMessage, mainKeyboard);
+    }
   } catch (error) {
     console.error('Start handler error:', error);
-    await ctx.reply('❌ Произошла ошибка. Попробуйте позже.');
+    await messageManager.sendMessage(ctx, '❌ Произошла ошибка. Попробуйте позже.');
   }
 };
 
@@ -46,19 +54,25 @@ const helpHandler = async (ctx) => {
 
 📋 Команды:
 /start - Главное меню
-/categories - Просмотр категорий
-/settings - Настройки
+/categories - Просмотр всех категорий
+/subscriptions - Мои подписки (отмена)
+/settings - Настройки аккаунта
 /help - Эта справка
 
 💡 Как пользоваться:
-1. Выберите интересующие категории
-2. Оплатите подписку
+1. Выберите интересующие категории (/categories)
+2. Оплатите подписку (от 200₽ в месяц)
 3. Получайте уведомления каждый день
+
+🔄 Управление подписками:
+• Просмотр: /subscriptions
+• Отмена: выберите подписку для отмены
+• Возврат средств не предусмотрен
 
 📞 Поддержка: @your_support_username
   `;
 
-  await ctx.reply(helpMessage);
+  await messageManager.sendMessage(ctx, helpMessage);
 };
 
 export default {

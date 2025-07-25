@@ -1,7 +1,5 @@
 import cron from 'node-cron';
 import User from '../database/models/User.js';
-import Job from '../database/models/Job.js';
-import { supabase } from '../config/supabase.js';
 
 class SchedulerService {
   constructor(bot) {
@@ -12,107 +10,92 @@ class SchedulerService {
   start() {
     if (this.isRunning) return;
     
-    // Daily job notifications at 9:00 AM
-    cron.schedule('0 9 * * *', async () => {
-      await this.sendDailyNotifications();
-    });
-
-    // Parse jobs every hour
-    cron.schedule('0 * * * *', async () => {
-      await this.parseJobs();
+    // Parse jobs every 5 minutes and send notifications
+    cron.schedule('*/2 * * * *', async () => {
+      await this.parseAndNotify();
     });
 
     this.isRunning = true;
-    console.log('📅 Scheduler started');
+    console.log('📅 Scheduler started - parsing every 2 minutes');
   }
 
-  async sendDailyNotifications() {
+  async parseAndNotify() {
     try {
-      console.log('📬 Starting daily notifications...');
+      console.log('🔄 Starting parse and notify cycle...');
       
+      // Получаем активных подписчиков
       const activeUsers = await User.getActiveSubscribers();
+      console.log(`👥 Found ${activeUsers.length} active subscribers`);
 
-      for (const user of activeUsers) {
-        try {
-          // Get user's subscribed categories
-          const categoryIds = user.subscriptions.map(sub => sub.category_id);
-          
-          // Get fresh jobs for these categories
-          const { data: jobs, error } = await supabase
-            .from('jobs')
-            .select(`
-              *,
-              categories(name)
-            `)
-            .in('category_id', categoryIds)
-            .not('id', 'in', `(
-              SELECT job_id FROM sent_jobs WHERE user_id = '${user.id}'
-            )`)
-            .gte('published_at', new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString())
-            .order('published_at', { ascending: false })
-            .limit(10);
-
-          if (error) throw error;
-
-          if (jobs.length > 0) {
-            await this.sendJobsToUser(user.telegram_id, jobs, user.id);
-          }
-
-        } catch (userError) {
-          console.error(`Error sending to user ${user.telegram_id}:`, userError);
-        }
+      if (activeUsers.length === 0) {
+        console.log('ℹ️ No active subscribers, skipping parsing');
+        return;
       }
 
-      console.log('✅ Daily notifications completed');
+      // Преобразуем подписки в формат для парсера
+      const userSubscriptions = this.prepareUserSubscriptions(activeUsers);
+      
+      // Парсим заявки и сразу отправляем их пользователям
+      const totalJobs = await this.parseJobsAndSend(userSubscriptions);
+      
+      if (totalJobs > 0) {
+        console.log(`📬 ${totalJobs} jobs found and sent to subscribers`);
+      } else {
+        console.log('ℹ️ No new jobs found');
+      }
+      
+      console.log('✅ Parse and notify cycle completed');
     } catch (error) {
-      console.error('Daily notifications error:', error);
+      console.error('❌ Parse and notify cycle error:', error);
     }
   }
 
-  async sendJobsToUser(telegramId, jobs, userId) {
-    try {
-      if (jobs.length === 0) return;
+  // Преобразует подписки пользователей в формат для парсера
+  prepareUserSubscriptions(activeUsers) {
+    const subscriptions = [];
+    
+    for (const user of activeUsers) {
+      for (const subscription of user.subscriptions) {
+        // Используем slug категории напрямую (он уже есть в базе данных)
+        const categorySlug = subscription.categories.slug;
 
-      const message = `
-🔔 Новые заказы за последние 24 часа:
-
-${jobs.map((job, index) => `
-${index + 1}. 📋 ${job.title}
-💰 ${job.budget_min || 'Не указан'} - ${job.budget_max || 'Не указан'} ${job.currency}
-🔗 [Перейти к заказу](${job.url})
-📂 ${job.categories.name}
-`).join('\n')}
-
-Удачи в работе! 🚀
-      `;
-
-      await this.bot.telegram.sendMessage(telegramId, message, {
-        parse_mode: 'Markdown',
-        disable_web_page_preview: true
-      });
-
-      // Mark jobs as sent
-      for (const job of jobs) {
-        await Job.markAsSent(userId, job.id);
+        subscriptions.push({
+          user: {
+            telegram_id: user.telegram_id,
+            username: user.username,
+            first_name: user.first_name
+          },
+          category_id: categorySlug, // Используем slug вместо маппинга
+          category_name: subscription.categories.name,
+          is_active: subscription.is_active && 
+                    new Date(subscription.expires_at) > new Date()
+        });
       }
+    }
+    
+    return subscriptions;
+  }
 
+  async parseJobsAndSend(userSubscriptions) {
+    try {
+      console.log('🔄 Parsing jobs and sending to subscribers...');
+      
+      // Import jobParser here to avoid circular dependencies
+      const { default: jobParser } = await import('./jobParser.js');
+      
+      // Передаем bot instance и подписки в парсер
+      const totalJobs = await jobParser.parseAllWithNotifications(this.bot, userSubscriptions);
+      
+      console.log(`✅ Job parsing and sending completed: ${totalJobs} jobs processed`);
+      return totalJobs;
     } catch (error) {
-      console.error('Send jobs error:', error);
+      console.error('Job parsing and sending error:', error);
+      return 0;
     }
   }
 
-  async parseJobs() {
-    try {
-      console.log('🔄 Parsing jobs...');
-      
-             // Import jobParser here to avoid circular dependencies
-       const { default: jobParser } = await import('./jobParser.js');
-       const totalJobs = await jobParser.parseAll();
-      
-      console.log(`✅ Job parsing completed: ${totalJobs} jobs added`);
-    } catch (error) {
-      console.error('Job parsing error:', error);
-    }
+  sleep(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
   }
 }
 
