@@ -10,13 +10,13 @@ class SchedulerService {
   start() {
     if (this.isRunning) return;
     
-    // Parse jobs every 5 minutes and send notifications
-    cron.schedule('*/2 * * * *', async () => {
+    // Parse jobs every 30 minutes and send notifications (changed from 2 minutes to reduce connection stress)
+    cron.schedule('*/30 * * * *', async () => {
       await this.parseAndNotify();
     });
 
     this.isRunning = true;
-    console.log('📅 Scheduler started - parsing every 2 minutes');
+    console.log('📅 Scheduler started - parsing every 30 minutes');
   }
 
   async parseAndNotify() {
@@ -100,12 +100,19 @@ class SchedulerService {
 }
 
 let schedulerInstance = null;
+let savedBot = null; // Сохраняем bot если он пришел раньше instance
 
 export default {
   start: () => {
     if (!schedulerInstance) {
       // Bot instance will be injected when available
       schedulerInstance = new SchedulerService();
+      
+      // Если bot был сохранен ранее, устанавливаем его сейчас
+      if (savedBot) {
+        schedulerInstance.bot = savedBot;
+        savedBot = null; // Очищаем
+      }
     }
     schedulerInstance.start();
   },
@@ -113,6 +120,8 @@ export default {
   setBot: (bot) => {
     if (schedulerInstance) {
       schedulerInstance.bot = bot;
+    } else {
+      savedBot = bot;
     }
   }
 }; 

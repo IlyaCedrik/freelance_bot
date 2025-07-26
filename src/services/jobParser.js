@@ -38,7 +38,9 @@ class JobParser {
       }
 
       const totalJobs = await telegramParser.parseAllChannels();
-      await telegramParser.disconnect();
+      
+      // Используем мягкое отключение вместо полного разрыва соединения
+      await telegramParser.softDisconnect();
       
       return totalJobs;
     } catch (error) {
@@ -60,12 +62,32 @@ class JobParser {
       }
 
       const totalJobs = await telegramParser.parseAllChannels();
-      await telegramParser.disconnect();
+      
+      // Используем мягкое отключение для поддержания соединения между циклами
+      await telegramParser.softDisconnect();
       
       return totalJobs;
     } catch (error) {
       console.error('Telegram parsing with notifications error:', error);
+      // При серьезной ошибке полностью разрываем соединение
+      try {
+        await telegramParser.disconnect();
+      } catch (disconnectError) {
+        console.error('Error during disconnect:', disconnectError);
+      }
       return 0;
+    }
+  }
+
+  // Добавляем метод для принудительного переподключения
+  async forceReconnect() {
+    try {
+      console.log('🔄 Forcing Telegram reconnection...');
+      await telegramParser.disconnect();
+      await telegramParser.init();
+      console.log('✅ Force reconnection completed');
+    } catch (error) {
+      console.error('❌ Force reconnection failed:', error);
     }
   }
 }

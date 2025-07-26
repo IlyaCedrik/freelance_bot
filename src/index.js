@@ -30,6 +30,32 @@ import navigation from './bot/utils/navigation.js';
 // Initialize bot
 const bot = new Telegraf(process.env.BOT_TOKEN);
 
+// Setup bot commands and menu
+async function setupBotCommands() {
+  try {
+    // Настройка списка команд для меню
+    const commands = [
+      { command: 'start', description: '🏠 Главное меню' },
+      { command: 'categories', description: '📋 Все категории заказов' },
+      { command: 'subscriptions', description: '📊 Мои подписки' },
+      { command: 'settings', description: '⚙️ Настройки аккаунта' },
+      { command: 'help', description: '❓ Помощь и информация' }
+    ];
+
+    // Устанавливаем команды для меню
+    await bot.telegram.setMyCommands(commands);
+    
+    // Настраиваем Menu Button (кнопка слева от скрепки)
+    await bot.telegram.setChatMenuButton({
+      type: 'commands'
+    });
+
+    console.log('✅ Bot commands menu configured successfully');
+  } catch (error) {
+    console.error('❌ Error setting up bot commands:', error);
+  }
+}
+
 // Setup scenes
 const stage = new Stage([subscriptionScene, paymentScene]);
 
@@ -160,16 +186,23 @@ const PORT = process.env.PORT || 3000;
 if (process.env.NODE_ENV === 'production') {
   bot.telegram.setWebhook(`${process.env.WEBHOOK_URL}/webhook`);
   
-  app.listen(PORT, () => {
+  app.listen(PORT, async () => {
     console.log(`🚀 Server running on port ${PORT}`);
     console.log(`📡 Webhook URL: ${process.env.WEBHOOK_URL}/webhook`);
+    
+    // Настройка меню команд
+    await setupBotCommands();
     
     schedulerService.setBot(bot);
     schedulerService.start();
   });
 } else {
-  bot.launch(() => {
+  bot.launch(async () => {
     console.log('🤖 Bot started in polling mode');
+    
+    // Настройка меню команд
+    await setupBotCommands();
+    
     schedulerService.setBot(bot);
     schedulerService.start();
   });

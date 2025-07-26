@@ -2,239 +2,459 @@ import { TelegramClient } from "telegram";
 import { StringSession } from "telegram/sessions/index.js";
 import telegramConfig from '../config/telegram.js';
 import databaseService from './databaseService.js';
+import notificationService from './notificationService.js';
 
+// Константы
+const CONNECTION_ERRORS = [
+  'TIMEOUT', 
+  'CONNECTION_DEVICE_MODEL_EMPTY', 
+  'NETWORK_MIGRATE', 
+  'CONNECTION_NOT_INITED', 
+  'CHANNEL_PRIVATE'
+];
+
+const TIMEOUTS = {
+  HEALTH_CHECK: 10000,
+  GET_ENTITY: 15000,
+  GET_MESSAGES: 20000,
+  CONNECTION_CACHE: 5 * 60 * 1000, // 5 минут
+};
+
+const DELAYS = {
+  BETWEEN_MESSAGES: 100,
+  MAX_RECONNECT: 10000,
+};
+
+/**
+ * Сервис для парсинга сообщений из Telegram каналов
+ */
 class TelegramParser {
   constructor() {
     this.client = null;
     this.isAuthenticated = false;
     this.config = telegramConfig;
-    this.bot = null; // Telegram bot instance для отправки сообщений
-    this.userSubscriptions = []; // Подписки пользователей
-    this.channels = []; // Каналы для парсинга из базы данных
-    this.categories = {}; // Категории из базы данных
-    
-    // Регулярные выражения для извлечения данных
-    this.patterns = {
-      budget: /(?:бюджет|budget|цена|стоимость|оплата)[\s:]*(\d+(?:\s*[-–—]\s*\d+)?)\s*([₽$€]|руб|дол|евро)/i,
-      email: /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g,
-      phone: /(?:\+7|8)[\s\-\(\)]?(?:\d[\s\-\(\)]?){10}/g,
-      telegram: /@[a-zA-Z0-9_]+/g,
-      deadline: /(?:срок|deadline|до)[\s:]*(\d{1,2}[\.\-\/]\d{1,2}[\.\-\/]?\d{2,4}?)/i
-    };
+    this.bot = null;
+    this.userSubscriptions = [];
+    this.channels = [];
+    this.categories = {};
+    this.connectionHealthy = false;
+    this.lastConnectionCheck = null;
+    this.maxReconnectAttempts = 3;
   }
 
-  // Устанавливает bot instance и подписки пользователей
+  /**
+   * Устанавливает бота и подписки пользователей
+   * @param {Object} bot - Экземпляр Telegram бота
+   * @param {Array} userSubscriptions - Список подписок пользователей
+   */
   setBotAndSubscriptions(bot, userSubscriptions) {
     this.bot = bot;
     this.userSubscriptions = userSubscriptions;
+    notificationService.setBot(bot);
   }
 
+  /**
+   * Инициализация клиента Telegram
+   * @returns {Promise<boolean>} Успешность инициализации
+   */
   async init() {
     try {
-      if (!this.config.apiId || !this.config.apiHash) {
-        throw new Error('API ID и API Hash должны быть установлены в src/config/telegram.js');
-      }
-
-      const session = new StringSession(this.config.session || '');
+      this._validateConfig();
       
-      this.client = new TelegramClient(session, this.config.apiId, this.config.apiHash, {
-        connectionRetries: 5,
-        deviceModel: this.config.settings.deviceModel,
-        appVersion: this.config.settings.appVersion
-      });
-
-      if (!this.config.session) {
-        console.log('⚠️ Session не найдена, требуется авторизация');
-        return false;
+      if (await this._isExistingConnectionHealthy()) {
+        console.log('✅ Using existing healthy Telegram connection');
+        return true;
       }
 
-      await this.client.connect();
-      this.isAuthenticated = await this.client.checkAuthorization();
+      await this._initializeClient();
+      await this._authenticateClient();
       
-      if (!this.isAuthenticated) {
-        console.log('⚠️ Telegram client not authenticated');
-        return false;
-      }
-
+      this._markConnectionHealthy();
       console.log('✅ Telegram client успешно инициализирован');
       return true;
     } catch (error) {
-      console.error('❌ Telegram client initialization error:', error);
+      console.error('❌ Telegram init error:', error.message);
+      this._markConnectionUnhealthy();
       return false;
     }
   }
 
-  async parseAllChannels() {
-    if (!this.isAuthenticated) {
-      console.log('❌ Telegram client не авторизован');
-      return 0;
+  /**
+   * Проверяет валидность конфигурации
+   * @private
+   */
+  _validateConfig() {
+    if (!this.config.apiId || !this.config.apiHash) {
+      throw new Error('API ID и API Hash должны быть установлены');
+    }
+  }
+
+  /**
+   * Проверяет существующее соединение
+   * @private
+   * @returns {Promise<boolean>}
+   */
+  async _isExistingConnectionHealthy() {
+    return this.client && 
+           this.connectionHealthy && 
+           await this.checkConnectionHealth();
+  }
+
+  /**
+   * Инициализирует Telegram клиент
+   * @private
+   */
+  async _initializeClient() {
+    if (!this.config.session) {
+      throw new Error('Session не найдена');
     }
 
-    if (!this.bot) {
-      console.log('❌ Bot instance не установлен');
+    const session = new StringSession(this.config.session);
+    
+    this.client = new TelegramClient(session, this.config.apiId, this.config.apiHash, {
+      connectionRetries: 5,
+      retryDelay: 2000,
+      timeout: 30000,
+      deviceModel: this.config.settings.deviceModel,
+      appVersion: this.config.settings.appVersion,
+      useWSS: false
+    });
+
+    await this.connectWithRetry();
+  }
+
+  /**
+   * Аутентификация клиента
+   * @private
+   */
+  async _authenticateClient() {
+    this.isAuthenticated = await this.client.checkAuthorization();
+    
+    if (!this.isAuthenticated) {
+      throw new Error('Аутентификация не пройдена');
+    }
+  }
+
+  /**
+   * Подключение с повторными попытками
+   */
+  async connectWithRetry() {
+    for (let attempt = 1; attempt <= this.maxReconnectAttempts; attempt++) {
+      try {
+        await this.client.connect();
+        return;
+      } catch (error) {
+        if (attempt < this.maxReconnectAttempts) {
+          const delay = Math.min(1000 * Math.pow(2, attempt), DELAYS.MAX_RECONNECT);
+          await this.sleep(delay);
+        } else {
+          throw new Error(`Failed to connect after ${this.maxReconnectAttempts} attempts`);
+        }
+      }
+    }
+  }
+
+  /**
+   * Проверка состояния соединения
+   * @returns {Promise<boolean>}
+   */
+  async checkConnectionHealth() {
+    try {
+      if (this._isCacheValid()) {
+        return this.connectionHealthy;
+      }
+
+      if (!this.client?.connected) {
+        return this._markConnectionUnhealthy();
+      }
+
+      await this._performHealthCheck();
+      return this._markConnectionHealthy();
+    } catch (error) {
+      return this._markConnectionUnhealthy();
+    }
+  }
+
+  /**
+   * Проверяет валидность кеша соединения
+   * @private
+   * @returns {boolean}
+   */
+  _isCacheValid() {
+    return this.lastConnectionCheck && 
+           Date.now() - this.lastConnectionCheck < TIMEOUTS.CONNECTION_CACHE;
+  }
+
+  /**
+   * Выполняет проверку здоровья соединения
+   * @private
+   */
+  async _performHealthCheck() {
+    await Promise.race([
+      this.client.getMe(),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('Health check timeout')), TIMEOUTS.HEALTH_CHECK)
+      )
+    ]);
+  }
+
+  /**
+   * Помечает соединение как здоровое
+   * @private
+   * @returns {boolean}
+   */
+  _markConnectionHealthy() {
+    this.connectionHealthy = true;
+    this.lastConnectionCheck = Date.now();
+    return true;
+  }
+
+  /**
+   * Помечает соединение как нездоровое
+   * @private
+   * @returns {boolean}
+   */
+  _markConnectionUnhealthy() {
+    this.connectionHealthy = false;
+    return false;
+  }
+
+  /**
+   * Восстановление соединения
+   * @returns {Promise<boolean>}
+   */
+  async ensureConnection() {
+    if (await this.checkConnectionHealth()) return true;
+    
+    try {
+      if (this.client) await this.client.disconnect();
+      return await this.init();
+    } catch (error) {
+      console.error('❌ Failed to restore connection:', error.message);
+      return false;
+    }
+  }
+
+  /**
+   * Парсинг всех каналов
+   * @returns {Promise<number>} Количество найденных заказов
+   */
+  async parseAllChannels() {
+    if (!this._isReadyForParsing()) {
       return 0;
     }
 
     try {
-      // Загружаем каналы из базы данных
+      if (!await this.ensureConnection()) return 0;
+
       await this.loadChannelsFromDatabase();
-      
-      if (this.channels.length === 0) {
-        console.log('⚠️ Нет активных каналов для парсинга');
-        return 0;
-      }
+      if (this.channels.length === 0) return 0;
 
-      let totalJobs = 0;
-      console.log(`📋 Каналов для парсинга: ${this.channels.length}`);
-      console.log(`👥 Активных пользователей с подписками: ${this.userSubscriptions.length}`);
-
-      for (const channel of this.channels) {
-        try {
-          console.log(`🔍 Парсинг канала: ${channel.name} (@${channel.username}) [${channel.categories.name}]`);
-          const channelJobs = await this.parseChannel(channel);
-          totalJobs += channelJobs;
-          console.log(`✅ ${channel.name}: ${channelJobs} новых заказов отправлено`);
-          
-          // Обновляем время последнего парсинга
-          await databaseService.updateChannelLastParsed(channel.id);
-          
-          // Пауза между каналами
-          await this.sleep(this.config.settings.pauseBetweenChannels);
-        } catch (error) {
-          console.error(`❌ Ошибка парсинга ${channel.name}:`, error);
-        }
-      }
-
-      console.log(`🎉 Всего обработано и отправлено: ${totalJobs} заказов`);
-      return totalJobs;
+      return await this._parseChannelsSequentially();
     } catch (error) {
-      console.error('❌ Telegram parsing error:', error);
+      console.error('❌ Telegram parsing error:', error.message);
+      
+      if (this.isConnectionError(error)) {
+        this.connectionHealthy = false;
+      }
+      
       return 0;
     }
   }
 
-  // Загружает каналы и категории из базы данных
+  /**
+   * Проверяет готовность к парсингу
+   * @private
+   * @returns {boolean}
+   */
+  _isReadyForParsing() {
+    return this.isAuthenticated && this.connectionHealthy && this.bot;
+  }
+
+  /**
+   * Парсит каналы последовательно
+   * @private
+   * @returns {Promise<number>}
+   */
+  async _parseChannelsSequentially() {
+    let totalJobs = 0;
+
+    for (const channel of this.channels) {
+      try {
+        if (!await this.ensureConnection()) continue;
+
+        const channelJobs = await this.parseChannel(channel);
+        totalJobs += channelJobs;
+        
+        if (channelJobs > 0) {
+          await databaseService.updateChannelLastParsed(channel.id);
+        }
+        
+        await this.sleep(this.config.settings.pauseBetweenChannels);
+      } catch (error) {
+        console.error(`❌ Error parsing ${channel.name}:`, error.message);
+        
+        if (this.isConnectionError(error)) {
+          await this.ensureConnection();
+        }
+      }
+    }
+
+    return totalJobs;
+  }
+
+  /**
+   * Загрузка каналов из базы данных
+   */
   async loadChannelsFromDatabase() {
     try {
       this.channels = await databaseService.getParsingChannels();
-      
-      // Создаем мапу категорий для быстрого доступа
-      this.categories = {};
-      for (const channel of this.channels) {
-        this.categories[channel.categories.slug] = channel.categories;
-      }
-      
-      console.log(`📋 Загружено каналов: ${this.channels.length}`);
-      console.log(`📂 Категорий: ${Object.keys(this.categories).length}`);
+      this._buildCategoriesMap();
     } catch (error) {
-      console.error('❌ Ошибка загрузки каналов из базы данных:', error);
+      console.error('❌ Error loading channels:', error.message);
       this.channels = [];
       this.categories = {};
     }
   }
 
-  async parseChannel(channel) {
-    try {
-      // Получаем entity канала
-      const entity = await this.client.getEntity(channel.username);
-      
-      // Получаем последние сообщения (за последние N часов)
-      const timeWindow = this.config.settings.timeWindow * 60 * 60; // часы в секунды
-      const messages = await this.client.getMessages(entity, {
-        limit: this.config.settings.messageLimit,
-        offsetDate: Math.floor(Date.now() / 1000) - timeWindow
-      });
-
-      let jobsCount = 0;
-
-      for (const message of messages) {
-        if (!message.text) continue;
-
-        // Проверяем, содержит ли сообщение ключевые слова из базы данных
-        const hasKeywords = channel.keywords.some(keyword => 
-          message.text.toLowerCase().includes(keyword.toLowerCase())
-        );
-
-        if (!hasKeywords) continue;
-
-        // Извлекаем данные о заказе
-        const jobData = this.extractJobData(message, channel);
-        
-        if (jobData) {
-          // Отправляем заказ подписанным пользователям
-          const sentCount = await this.sendJobToSubscribers(jobData);
-          if (sentCount > 0) {
-            jobsCount++;
-            console.log(`💼 Заказ отправлен ${sentCount} пользователям: ${jobData.title.substring(0, 50)}...`);
-          }
-        }
-
-        // Небольшая пауза между сообщениями
-        await this.sleep(100);
-      }
-
-      return jobsCount;
-    } catch (error) {
-      console.error(`❌ Ошибка парсинга канала ${channel.username}:`, error);
-      return 0;
+  /**
+   * Строит карту категорий
+   * @private
+   */
+  _buildCategoriesMap() {
+    this.categories = {};
+    for (const channel of this.channels) {
+      this.categories[channel.categories.slug] = channel.categories;
     }
   }
 
-  extractJobData(message, channel) {
+  /**
+   * Парсинг отдельного канала
+   * @param {Object} channel - Данные канала
+   * @returns {Promise<number>} Количество найденных заказов
+   */
+  async parseChannel(channel) {
     try {
-      const text = message.text;
-      const messageId = message.id;
-      const messageDate = new Date(message.date * 1000);
+      const entity = await this._getChannelEntity(channel);
+      const messages = await this._getChannelMessages(entity);
+      const recentMessages = this._filterRecentMessages(messages);
+      
+      console.log(`📋 Получено ${messages.length} сообщений, из них за последние ${this.config.settings.timeWindow}ч: ${recentMessages.length} из канала ${channel.name}`);
 
-      // Извлекаем заголовок (первая строка или первые 100 символов)
-      const lines = text.split('\n').filter(line => line.trim());
-      const title = lines[0] ? lines[0].substring(0, 100) : 'Заказ из телеграм канала';
+      return await this._processChannelMessages(recentMessages, channel);
+    } catch (error) {
+      if (error.message?.includes('TIMEOUT')) {
+        this.connectionHealthy = false;
+      }
+      throw error;
+    }
+  }
 
-      // Извлекаем бюджет
-      const budgetMatch = text.match(this.patterns.budget);
-      let budgetMin = null;
-      let budgetMax = null;
-      let currency = 'RUB';
+  /**
+   * Получает entity канала
+   * @private
+   * @param {Object} channel
+   * @returns {Promise<Object>}
+   */
+  async _getChannelEntity(channel) {
+    return Promise.race([
+      this.client.getEntity(channel.username),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('TIMEOUT: getEntity')), TIMEOUTS.GET_ENTITY)
+      )
+    ]);
+  }
 
-      if (budgetMatch) {
-        const budgetStr = budgetMatch[1];
-        const currencyStr = budgetMatch[2];
-        
-        if (budgetStr.includes('-') || budgetStr.includes('–') || budgetStr.includes('—')) {
-          const [min, max] = budgetStr.split(/[-–—]/).map(b => parseInt(b.trim().replace(/\s/g, '')));
-          budgetMin = min || null;
-          budgetMax = max || null;
-        } else {
-          budgetMin = parseInt(budgetStr.replace(/\s/g, ''));
-          budgetMax = budgetMin;
-        }
+  /**
+   * Получает сообщения канала
+   * @private
+   * @param {Object} entity
+   * @returns {Promise<Array>}
+   */
+  async _getChannelMessages(entity) {
+    return Promise.race([
+      this.client.getMessages(entity, {
+        limit: this.config.settings.messageLimit
+      }),
+      new Promise((_, reject) => 
+        setTimeout(() => reject(new Error('TIMEOUT: getMessages')), TIMEOUTS.GET_MESSAGES)
+      )
+    ]);
+  }
 
-        // Определяем валюту
-        if (currencyStr.includes('$') || currencyStr.includes('дол')) currency = 'USD';
-        else if (currencyStr.includes('€') || currencyStr.includes('евро')) currency = 'EUR';
+  /**
+   * Фильтрует недавние сообщения
+   * @private
+   * @param {Array} messages
+   * @returns {Array}
+   */
+  _filterRecentMessages(messages) {
+    const timeWindow = this.config.settings.timeWindow * 60 * 60; // в секундах
+    const cutoffTime = Math.floor(Date.now() / 1000) - timeWindow;
+    return messages.filter(msg => msg.date >= cutoffTime);
+  }
+
+  /**
+   * Обрабатывает сообщения канала
+   * @private
+   * @param {Array} messages
+   * @param {Object} channel
+   * @returns {Promise<number>}
+   */
+  async _processChannelMessages(messages, channel) {
+    let jobsCount = 0;
+
+    for (const message of messages) {
+      if (!message.text) continue;
+
+      const hasKeywords = this._messageHasKeywords(message, channel);
+      if (!hasKeywords) continue;
+
+      const jobData = this.extractJobData(message, channel);
+      
+      if (jobData) {
+        const sentCount = await this.sendJobToSubscribers(jobData);
+        if (sentCount > 0) jobsCount++;
       }
 
-      // Используем категорию канала из базы данных
-      const category = channel.categories;
+      await this.sleep(DELAYS.BETWEEN_MESSAGES);
+    }
 
-      // Создаем URL к сообщению
-      const url = `https://t.me/${channel.username}/${messageId}`;
+    return jobsCount;
+  }
 
+  /**
+   * Проверяет наличие ключевых слов в сообщении
+   * @private
+   * @param {Object} message
+   * @param {Object} channel
+   * @returns {boolean}
+   */
+  _messageHasKeywords(message, channel) {
+    return channel.keywords.some(keyword => 
+      message.text.toLowerCase().includes(keyword.toLowerCase())
+    );
+  }
+
+  /**
+   * Извлекает данные заказа из сообщения
+   * @param {Object} message - Сообщение из Telegram
+   * @param {Object} channel - Данные канала
+   * @returns {Object|null} Данные заказа
+   */
+  extractJobData(message, channel) {
+    try {
       return {
-        title: this.cleanText(title),
-        description: this.cleanText(text.substring(0, 1000)),
-        category_id: category.slug, // Используем slug вместо id
-        category_name: category.name,
-        budget_min: budgetMin,
-        budget_max: budgetMax,
-        currency: currency,
-        url: url,
+        message,
+        category_id: channel.categories.slug,
+        category_name: channel.categories.name,
+        url: `https://t.me/${channel.username}/${message.id}`,
         source: `telegram_${channel.username}`,
-        published_at: messageDate.toISOString(),
-        channel_id: channel.id // Добавляем ID канала
+        published_at: new Date(message.date * 1000).toISOString(),
+        channel_id: channel.id
       };
     } catch (error) {
-      console.error('Error extracting job data:', error);
+      console.error('Error extracting job data:', error.message);
       return null;
     }
   }
@@ -247,102 +467,68 @@ class TelegramParser {
   }
 
   async sendJobToSubscribers(jobData) {
-    let sentCount = 0;
-
     try {
-      // Находим пользователей, подписанных на эту категорию
-      const subscribedUsers = this.userSubscriptions.filter(sub => 
-        sub.category_id === jobData.category_id && sub.is_active
-      );
-
-      for (const subscription of subscribedUsers) {
-        try {
-          const message = this.formatJobMessage(jobData);
-          
-          await this.bot.telegram.sendMessage(
-            subscription.user.telegram_id,
-            message,
-            {
-              parse_mode: 'Markdown',
-              disable_web_page_preview: true
-            }
-          );
-          
-          sentCount++;
-          
-          // Пауза между отправками
-          await this.sleep(50);
-          
-        } catch (error) {
-          console.error(`Error sending to user ${subscription.user.telegram_id}:`, error);
-          
-          // Если пользователь заблокировал бота
-          if (error.response?.error_code === 403) {
-            console.log(`User ${subscription.user.telegram_id} blocked the bot`);
-          }
-        }
-      }
-
+      const subscribedUsers = this._getSubscribedUsers(jobData.category_id);
+      return await notificationService.sendJobToSubscribers(jobData, subscribedUsers);
     } catch (error) {
-      console.error('Error sending job to subscribers:', error);
+      console.error('Error sending job to subscribers:', error.message);
+      return 0;
     }
-
-    return sentCount;
   }
 
-  formatJobMessage(jobData) {
-    const budgetText = jobData.budget_min && jobData.budget_max 
-      ? `💰 ${jobData.budget_min} - ${jobData.budget_max} ${jobData.currency}`
-      : '💰 Бюджет не указан';
-
-    return `
-🔔 Новый заказ
-
-📋 ${this.sanitizeText(jobData.title)}
-
-${budgetText}
-📂 ${jobData.category_name}
-🔗 [Перейти к заказу](${jobData.url})
-
-💡 Для отписки используйте /settings
-    `.trim();
+  /**
+   * Получает подписанных пользователей
+   * @private
+   * @param {string} categoryId
+   * @returns {Array}
+   */
+  _getSubscribedUsers(categoryId) {
+    return this.userSubscriptions.filter(sub => 
+      sub.category_id === categoryId && sub.is_active
+    );
   }
 
-  cleanText(text) {
-    if (!text) return '';
-    return text
-      .replace(/\s+/g, ' ') // Заменяем множественные пробелы
-      .replace(/[^\w\sа-яёА-ЯЁ.,!?():\-@]/g, '') // Убираем специальные символы кроме нужных
-      .trim();
+  /**
+   * Проверяет является ли ошибка связанной с соединением
+   * @param {Error} error
+   * @returns {boolean}
+   */
+  isConnectionError(error) {
+    return CONNECTION_ERRORS.some(errType => 
+      error.message?.includes(errType) || error.toString().includes(errType)
+    );
   }
 
-  // Санитизируем текст для Markdown
-  sanitizeText(text) {
-    if (!text) return '';
-    return text
-      .replace(/[_*[\]()~`>#+=|{}.!-]/g, '\\$&')
-      .substring(0, 200);
-  }
-
+  /**
+   * Отключение от Telegram
+   */
   async disconnect() {
-    if (this.client) {
-      await this.client.disconnect();
+    try {
+      if (this.client?.connected) {
+        await this.client.disconnect();
+        this.connectionHealthy = false;
+        this.lastConnectionCheck = null;
+      }
+    } catch (error) {
+      console.error('❌ Disconnect error:', error.message);
     }
   }
 
+  /**
+   * Мягкое отключение (очистка кеша)
+   */
+  async softDisconnect() {
+    this.lastConnectionCheck = null;
+  }
+
+  /**
+   * Утилита для паузы
+   * @param {number} ms - Миллисекунды
+   * @returns {Promise}
+   */
   sleep(ms) {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
-
-  // Получить каналы из базы данных
-  getChannels() {
-    return this.channels;
-  }
-
-  // Получить категории из базы данных
-  getCategories() {
-    return this.categories;
-  }
 }
 
-export default new TelegramParser(); 
+export default new TelegramParser();
