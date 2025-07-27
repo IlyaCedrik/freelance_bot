@@ -1,6 +1,7 @@
 import Category from '../../database/models/Category.js';
 import Subscription from '../../database/models/Subscription.js';
 import User from '../../database/models/User.js';
+import Referral from '../../database/models/Referral.js';
 import { supabase } from '../../config/supabase.js';
 import messageManager from '../utils/messageManager.js';
 
@@ -197,6 +198,33 @@ const successfulPayment = async (ctx) => {
 
     console.log('✅ Subscription created:', subscription.id, 'expires:', expiresAt);
 
+    // Начисление реферальной комиссии
+    const user = await User.findByTelegramId(ctx.from.id);
+    if (user.referrer_id) {
+      try {
+        console.log('💰 Processing referral commission for referrer:', user.referrer_id);
+        
+        await Referral.addCommission(
+          user.referrer_id,
+          user.id,
+          paymentData.id,
+          paymentData.amount
+        );
+
+        // Обновляем статистику реферальной программы
+        await Referral.updateReferralStats(user.referrer_id, 'new_payment', paymentData.amount);
+        await Referral.updateReferralStats(user.referrer_id, 'activation');
+
+        // Уведомляем реферера
+        await notifyReferrer(ctx, user.referrer_id, paymentData.amount, paymentData.categories.name);
+
+        console.log('✅ Referral commission processed successfully');
+      } catch (referralError) {
+        console.error('❌ Error processing referral commission:', referralError);
+        // Не прерываем основной процесс из-за ошибки в реферальной системе
+      }
+    }
+
     const successMessage = `
 ✅ Платеж успешно обработан!
 
@@ -214,6 +242,38 @@ const successfulPayment = async (ctx) => {
   } catch (error) {
     console.error('❌ Successful payment error:', error);
     await messageManager.sendMessage(ctx, '❌ Ошибка при активации подписки. Обратитесь в поддержку.');
+  }
+};
+
+// Функция уведомления реферера
+const notifyReferrer = async (ctx, referrerId, paymentAmount, categoryName) => {
+  try {
+    const { data: referrerUser } = await supabase
+      .from('users')
+      .select('telegram_id, referral_balance')
+      .eq('id', referrerId)
+      .single();
+
+    if (!referrerUser) return;
+
+    const stats = await Referral.getReferralStats(referrerId);
+    const commissionAmount = Math.round(paymentAmount * stats.current_commission_percent / 100);
+
+    const notificationMessage = `
+🎉 Новое начисление по реферальной программе!
+
+💰 Сумма: +${(commissionAmount / 100).toFixed(0)}₽
+📂 Категория: ${categoryName}
+📈 Процент: ${stats.current_commission_percent}%
+
+💵 Ваш баланс: ${(referrerUser.referral_balance / 100).toFixed(0)}₽
+
+Поздравляем с успешным привлечением!
+    `;
+
+    await ctx.telegram.sendMessage(referrerUser.telegram_id, notificationMessage);
+  } catch (error) {
+    console.error('Error notifying referrer:', error);
   }
 };
 

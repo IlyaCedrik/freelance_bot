@@ -12,6 +12,20 @@ class Category {
     return data;
   }
 
+  static async findBySlug(slug) {
+    const { data, error } = await supabase
+      .from('categories')
+      .select('*')
+      .eq('slug', slug)
+      .single();
+
+    if (error && error.code !== 'PGRST116') {
+      throw error;
+    }
+
+    return data;
+  }
+
   static async findById(id) {
     const { data, error } = await supabase
       .from('categories')

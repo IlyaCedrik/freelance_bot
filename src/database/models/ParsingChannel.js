@@ -62,6 +62,23 @@ class ParsingChannel {
     return data;
   }
 
+  static async findById(id) {
+    const { data, error } = await supabase
+      .from('parsing_channels')
+      .select(`
+        *,
+        categories(*)
+      `)
+      .eq('id', id)
+      .single();
+
+    if (error && error.code !== 'PGRST116') {
+      throw error;
+    }
+
+    return data;
+  }
+
   static async create(channelData) {
     const { data, error } = await supabase
       .from('parsing_channels')

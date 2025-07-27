@@ -35,6 +35,36 @@ class NotificationService {
     return sentCount;
   }
 
+  async sendPromoCodeUsageNotification(telegramId, promoCode, userName) {
+    if (!this.bot) {
+      console.error('Bot instance not set for promo code notification');
+      return;
+    }
+
+    try {
+      const bonusText = promoCode.bonus_days > 0 ? ` (+${promoCode.bonus_days} дней)` : '';
+      const discountText = promoCode.discount_percent > 0 ? ` (скидка ${promoCode.discount_percent}%)` : '';
+
+      const notificationMessage = `
+🎉 Ваш промокод использован!
+
+🎫 Промокод: ${promoCode.code}
+👤 Пользователь: ${userName}
+🔢 Использований: ${promoCode.usage_count + 1}${promoCode.usage_limit ? `/${promoCode.usage_limit}` : ''}
+
+💎 Бонусы промокода:${bonusText}${discountText}
+
+📊 Посмотреть статистику промокодов можно в реферальной системе.
+      `;
+
+      await this.bot.telegram.sendMessage(telegramId, notificationMessage.trim());
+      console.log(`✅ Уведомление о промокоде отправлено пользователю ${telegramId}`);
+      
+    } catch (error) {
+      console.error(`❌ Ошибка отправки уведомления о промокоде пользователю ${telegramId}:`, error.message);
+    }
+  }
+
   async _sendJobMessage(subscription, jobData) {
     
     // Конвертируем в HTML формат (проще чем MarkdownV2)
