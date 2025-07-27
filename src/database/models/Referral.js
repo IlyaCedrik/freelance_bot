@@ -1,4 +1,5 @@
 import { supabase } from '../../config/supabase.js';
+import notificationService from '../../services/notificationService.js';
 
 class Referral {
   // Генерация уникального реферального кода
@@ -345,7 +346,6 @@ class Referral {
       const userName = newUser?.first_name || newUser?.username || 'Новый пользователь';
 
       // Используем notificationService для отправки уведомления
-      const { default: notificationService } = await import('../../services/notificationService.js');
       await notificationService.sendPromoCodeUsageNotification(
         creator.telegram_id,
         promoCode,

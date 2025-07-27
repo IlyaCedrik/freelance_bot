@@ -24,7 +24,7 @@ const showCategories = async (ctx) => {
 
 ${categories.map(cat => {
   const isSubscribed = subscribedCategoryIds.includes(cat.id);
-  const status = isSubscribed ? '✅' : '⭕';
+  const status = isSubscribed ? '⭕' : '✅';
   const price = (cat.price / 100).toFixed(0);
   return `${status} ${cat.name} - ${price}₽/мес`;
 }).join('\n')}

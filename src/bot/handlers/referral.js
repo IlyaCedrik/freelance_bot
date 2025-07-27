@@ -70,6 +70,7 @@ const refreshReferralStats = async (ctx) => {
 const showReferralDetails = async (ctx) => {
   try {
     const user = await User.findByTelegramId(ctx.from.id);
+    const isAdmin = await User.isAdmin(ctx.from.id);
     const referrals = await Referral.getUserReferrals(user.id, 10);
     const commissions = await Referral.getCommissionHistory(user.id, 10);
     
@@ -107,7 +108,17 @@ ${commissionsText}
 Для полного списка используйте кнопки ниже.
     `;
 
-    await messageManager.editMessage(ctx, message, referralDetailsKeyboard);
+    // Создаем клавиатуру в зависимости от прав пользователя
+    const keyboard = Markup.inlineKeyboard([
+      [Markup.button.callback('👥 Мои рефералы', 'referral_list')],
+      [Markup.button.callback('💳 История комиссий', 'commission_history')],
+      isAdmin 
+        ? [Markup.button.callback('🎫 Мои промокоды', 'show_user_promo_codes')]
+        : [Markup.button.callback('📋 Мои запросы', 'show_user_promo_requests')],
+      [Markup.button.callback('⬅️ Назад', 'referral_program')]
+    ]);
+
+    await messageManager.editMessage(ctx, message, keyboard);
   } catch (error) {
     console.error('Referral details error:', error);
     await messageManager.sendMessage(ctx, '❌ Ошибка при загрузке детальной статистики');
@@ -167,8 +178,18 @@ const initiateWithdraw = async (ctx, method) => {
 
 const createPromoCode = async (ctx) => {
   try {
-    await ctx.answerCbQuery('🎫 Запускаю создание промокода...');
-    await ctx.scene.enter('CREATE_PROMO_CODE');
+    // Проверяем права администратора
+    const isAdmin = await User.isAdmin(ctx.from.id);
+    
+    if (isAdmin) {
+      // Администратор может создавать промокоды напрямую
+      await ctx.answerCbQuery('🎫 Запускаю создание промокода...');
+      await ctx.scene.enter('CREATE_PROMO_CODE');
+    } else {
+      // Обычный пользователь отправляет запрос
+      await ctx.answerCbQuery('📝 Запускаю отправку запроса на промокод...');
+      await ctx.scene.enter('REQUEST_PROMO_CODE');
+    }
   } catch (error) {
     console.error('Create promo code error:', error);
     await ctx.answerCbQuery('❌ Ошибка при создании промокода');
@@ -219,6 +240,70 @@ const showUserPromoCodes = async (ctx) => {
   }
 };
 
+const showUserPromoRequests = async (ctx) => {
+  try {
+    const user = await User.findByTelegramId(ctx.from.id);
+    
+    // Получаем запросы пользователя
+    const { data: requests, error } = await supabase
+      .from('promo_code_requests')
+      .select('*')
+      .eq('user_id', user.id)
+      .order('created_at', { ascending: false });
+
+    if (error) throw error;
+
+    let message = '📋 Ваши запросы на промокоды\n\n';
+    
+    if (requests.length === 0) {
+      message += 'У вас пока нет запросов на промокоды.\n\n📝 Отправьте первый запрос на создание промокода!';
+    } else {
+      requests.forEach((request, index) => {
+        const createdDate = new Date(request.created_at).toLocaleDateString('ru-RU');
+        const processedDate = request.processed_at ? new Date(request.processed_at).toLocaleDateString('ru-RU') : null;
+        
+        let statusIcon;
+        switch (request.status) {
+          case 'pending': statusIcon = '⏳'; break;
+          case 'approved': statusIcon = '✅'; break;
+          case 'rejected': statusIcon = '❌'; break;
+          default: statusIcon = '❓';
+        }
+        
+        message += `${index + 1}. ${statusIcon} \`${request.requested_code}\`\n`;
+        message += `   📅 Дни: ${request.bonus_days} | 💰 Скидка: ${request.discount_percent}%\n`;
+        message += `   🔢 Лимит: ${request.usage_limit || 'Без ограничений'}\n`;
+        message += `   📅 Запрошен: ${createdDate}\n`;
+        
+        if (request.status === 'pending') {
+          message += `   ⏳ Ожидает рассмотрения\n`;
+        } else if (request.status === 'approved') {
+          message += `   ✅ Одобрен: ${processedDate}\n`;
+        } else if (request.status === 'rejected') {
+          message += `   ❌ Отклонен: ${processedDate}\n`;
+          if (request.admin_comment) {
+            message += `   💬 Комментарий: ${request.admin_comment}\n`;
+          }
+        }
+        message += '\n';
+      });
+    }
+
+    await messageManager.editMessage(
+      ctx,
+      message,
+      Markup.inlineKeyboard([
+        [Markup.button.callback('📝 Новый запрос', 'create_promo_code')],
+        [Markup.button.callback('⬅️ Назад', 'referral_program')]
+      ]),
+      { parse_mode: 'Markdown' }
+    );
+  } catch (error) {
+    console.error('Show user promo requests error:', error);
+    await messageManager.sendMessage(ctx, '❌ Ошибка при загрузке запросов');
+  }
+};
+
 export default {
   showReferralProgram,
   refreshReferralStats,
@@ -226,5 +311,6 @@ export default {
   showWithdrawOptions,
   initiateWithdraw,
   createPromoCode,
-  showUserPromoCodes
+  showUserPromoCodes,
+  showUserPromoRequests
 }; 

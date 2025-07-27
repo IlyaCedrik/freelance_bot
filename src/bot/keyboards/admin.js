@@ -109,7 +109,7 @@ export const channelStatusKeyboard = (channels) => {
 export const categoryListKeyboard = (categories) => {
   const buttons = categories.map(category => [
     Markup.button.callback(
-      `${category.is_active ?  '❌' : '✅'} ${category.name} (${category.price / 100}₽)`,
+      `${category.is_active ? '✅' : '❌'} ${category.name} (${category.price / 100}₽)`,
       `admin_category_details_${category.id}`
     )
   ]);

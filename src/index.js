@@ -8,6 +8,7 @@ import cors from 'cors';
 // Services
 import { supabase } from './config/supabase.js';
 import schedulerService from './services/scheduler.js';
+import notificationService from './services/notificationService.js';
 
 // Bot handlers
 import startHandler from './bot/handlers/start.js';
@@ -35,6 +36,7 @@ import {
 import subscriptionScene from './bot/scenes/subscription.js';
 import paymentScene from './bot/scenes/payment.js';
 import promoCodeScene from './bot/scenes/promoCode.js';
+import promoRequestScene from './bot/scenes/promoRequest.js';
 
 // Middleware
 import authMiddleware from './bot/middleware/auth.js';
@@ -46,6 +48,9 @@ import navigation from './bot/utils/navigation.js';
 
 // Initialize bot
 const bot = new Telegraf(process.env.BOT_TOKEN);
+
+// Setup notification service
+notificationService.setBot(bot);
 
 // Setup bot commands and menu
 async function setupBotCommands() {
@@ -75,7 +80,7 @@ async function setupBotCommands() {
 }
 
 // Setup scenes
-const stage = new Stage([subscriptionScene, paymentScene, promoCodeScene]);
+const stage = new Stage([subscriptionScene, paymentScene, promoCodeScene, promoRequestScene]);
 
 // Bot middleware
 bot.use(session());
@@ -99,6 +104,7 @@ function setupNavigation() {
   navigation.register('referral_withdraw', referralHandler.showWithdrawOptions);
   navigation.register('create_promo_code', referralHandler.createPromoCode);
   navigation.register('show_user_promo_codes', referralHandler.showUserPromoCodes);
+  navigation.register('show_user_promo_requests', referralHandler.showUserPromoRequests);
   
   // Профиль
   navigation.register('user_stats', profileHandler.showUserStats);
@@ -200,6 +206,51 @@ bot.action('confirm_promo_creation', async (ctx) => {
   await ctx.answerCbQuery('Сначала начните создание промокода');
 });
 
+// Обработчики для сцены запроса промокода
+bot.action('cancel_promo_request', async (ctx) => {
+  try {
+    await ctx.answerCbQuery('Запрос отменен');
+    await messageManager.sendMessage(
+      ctx,
+      'Запрос на промокод отменен',
+      Markup.inlineKeyboard([
+        [Markup.button.callback('📊 К реферальной системе', 'referral_program')],
+        [Markup.button.callback('🏠 Главное меню', 'back_to_main')]
+      ])
+    );
+  } catch (error) {
+    console.error('Cancel promo request error:', error);
+  }
+});
+
+bot.action(/^request_days_\d+$/, async (ctx) => {
+  if (ctx.scene && ctx.scene.current) {
+    return;
+  }
+  await ctx.answerCbQuery('Сначала начните создание запроса на промокод');
+});
+
+bot.action(/^request_discount_\d+$/, async (ctx) => {
+  if (ctx.scene && ctx.scene.current) {
+    return;
+  }
+  await ctx.answerCbQuery('Сначала начните создание запроса на промокод');
+});
+
+bot.action(/^request_limit_\d+$/, async (ctx) => {
+  if (ctx.scene && ctx.scene.current) {
+    return;
+  }
+  await ctx.answerCbQuery('Сначала начните создание запроса на промокод');
+});
+
+bot.action('confirm_promo_request', async (ctx) => {
+  if (ctx.scene && ctx.scene.current) {
+    return;
+  }
+  await ctx.answerCbQuery('Сначала начните создание запроса на промокод');
+});
+
 // Админ действия (с проверкой прав)
 bot.action('admin_main', requireAdmin, showAdminPanel);
 bot.action('admin_channels', requireAdmin, showChannelManagement);
@@ -221,7 +272,7 @@ const navActions = [
   'show_subscriptions', 'show_privacy', 'export_data', 
   'delete_account_confirm', 'delete_account_final',
   'referral_program', 'referral_refresh', 'referral_details', 'referral_withdraw',
-  'create_promo_code', 'show_user_promo_codes', 'user_stats'
+  'create_promo_code', 'show_user_promo_codes', 'show_user_promo_requests', 'user_stats'
 ];
 
 navActions.forEach(action => {
@@ -247,6 +298,16 @@ bot.on('callback_query', async (ctx) => {
           'Сессия создания промокода истекла. Нажмите на кнопку ниже, чтобы начать заново.',
           Markup.inlineKeyboard([
             [Markup.button.callback('🎫 Создать промокод', 'create_promo_code')],
+            [Markup.button.callback('🏠 Главное меню', 'back_to_main')]
+          ])
+        );
+      } else if (callbackData.startsWith('request_') || callbackData === 'confirm_promo_request') {
+        await ctx.answerCbQuery('⚠️ Сессия запроса промокода истекла. Начните заново.');
+        await messageManager.sendMessage(
+          ctx,
+          'Сессия запроса промокода истекла. Нажмите на кнопку ниже, чтобы начать заново.',
+          Markup.inlineKeyboard([
+            [Markup.button.callback('📝 Запросить промокод', 'create_promo_code')],
             [Markup.button.callback('🏠 Главное меню', 'back_to_main')]
           ])
         );

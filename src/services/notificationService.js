@@ -65,6 +65,20 @@ class NotificationService {
     }
   }
 
+  async sendAdminNotification(telegramId, message) {
+    if (!this.bot) {
+      console.error('Bot instance not set for admin notification');
+      return;
+    }
+
+    try {
+      await this.bot.telegram.sendMessage(telegramId, message.trim());
+      console.log(`✅ Админ уведомление отправлено ${telegramId}`);
+    } catch (error) {
+      console.error(`❌ Ошибка отправки админ уведомления ${telegramId}:`, error.message);
+    }
+  }
+
   async _sendJobMessage(subscription, jobData) {
     
     // Конвертируем в HTML формат (проще чем MarkdownV2)
