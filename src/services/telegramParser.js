@@ -245,12 +245,25 @@ class TelegramParser {
     }
 
     try {
+      const startTime = new Date();
+      console.log(`📡 Starting Telegram channels parsing at ${startTime.toLocaleString('ru-RU')}`);
+      
       if (!await this.ensureConnection()) return 0;
 
       await this.loadChannelsFromDatabase();
-      if (this.channels.length === 0) return 0;
+      if (this.channels.length === 0) {
+        console.log('⚠️ No channels to parse');
+        return 0;
+      }
 
-      return await this._parseChannelsSequentially();
+      console.log(`📋 Parsing ${this.channels.length} channels...`);
+      const totalJobs = await this._parseChannelsSequentially();
+      
+      const endTime = new Date();
+      const duration = Math.round((endTime - startTime) / 1000);
+      console.log(`📡 Telegram channels parsing completed: ${totalJobs} jobs found in ${duration}s`);
+      
+      return totalJobs;
     } catch (error) {
       console.error('❌ Telegram parsing error:', error.message);
       

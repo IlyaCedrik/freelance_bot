@@ -3,10 +3,14 @@ import telegramParser from './telegramParser.js';
 class JobParser {
   async parseAll() {
     try {
-      console.log('🔄 Starting Telegram job parsing...');
+      const startTime = new Date();
+      console.log(`🔄 Starting Telegram job parsing at ${startTime.toLocaleString('ru-RU')}...`);
       
       const totalJobs = await this.parseTelegram();
-      console.log(`📊 Total jobs parsed: ${totalJobs}`);
+      
+      const endTime = new Date();
+      const duration = Math.round((endTime - startTime) / 1000);
+      console.log(`📊 Total jobs parsed: ${totalJobs} in ${duration}s`);
       return totalJobs;
     } catch (error) {
       console.error('Job parsing error:', error);
@@ -17,10 +21,14 @@ class JobParser {
   // Новый метод для парсинга с уведомлениями
   async parseAllWithNotifications(bot, userSubscriptions) {
     try {
-      console.log('🔄 Starting Telegram job parsing with notifications...');
+      const startTime = new Date();
+      console.log(`🔄 Starting Telegram job parsing with notifications at ${startTime.toLocaleString('ru-RU')}...`);
       
       const totalJobs = await this.parseTelegramWithNotifications(bot, userSubscriptions);
-      console.log(`📊 Total jobs parsed and sent: ${totalJobs}`);
+      
+      const endTime = new Date();
+      const duration = Math.round((endTime - startTime) / 1000);
+      console.log(`📊 Total jobs parsed and sent: ${totalJobs} in ${duration}s`);
       return totalJobs;
     } catch (error) {
       console.error('Job parsing with notifications error:', error);

@@ -21,7 +21,8 @@ class SchedulerService {
 
   async parseAndNotify() {
     try {
-      console.log('🔄 Starting parse and notify cycle...');
+      const startTime = new Date();
+      console.log(`🔄 Starting parse and notify cycle at ${startTime.toLocaleString('ru-RU')}...`);
       
       // Получаем активных подписчиков
       const activeUsers = await User.getActiveSubscribers();
@@ -38,13 +39,16 @@ class SchedulerService {
       // Парсим заявки и сразу отправляем их пользователям
       const totalJobs = await this.parseJobsAndSend(userSubscriptions);
       
+      const endTime = new Date();
+      const duration = Math.round((endTime - startTime) / 1000);
+      
       if (totalJobs > 0) {
         console.log(`📬 ${totalJobs} jobs found and sent to subscribers`);
       } else {
         console.log('ℹ️ No new jobs found');
       }
       
-      console.log('✅ Parse and notify cycle completed');
+      console.log(`✅ Parse and notify cycle completed in ${duration}s at ${endTime.toLocaleString('ru-RU')}`);
     } catch (error) {
       console.error('❌ Parse and notify cycle error:', error);
     }

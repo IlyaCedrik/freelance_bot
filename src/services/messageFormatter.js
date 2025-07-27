@@ -112,42 +112,63 @@ class MessageFormatter {
       return '';
     }
 
+    // If no entities, just escape and return the text
     if (entities.length === 0) {
       return this._escapeHTML(text);
     }
 
-    // Фильтруем валидные entities и сортируем по offset в обратном порядке
+    // Filter and sort entities
     const validEntities = entities
       .filter(entity => this._isValidTelegramEntity(entity))
-      .sort((a, b) => b.offset - a.offset);
+      .sort((a, b) => a.offset - b.offset); // Sort by offset (start to end)
 
-    let result = text;
+    if (validEntities.length === 0) {
+      return this._escapeHTML(text);
+    }
 
-    // Обрабатываем entities от конца к началу, чтобы не нарушать смещения
+    // Build result by processing text segments
+    let result = '';
+    let lastOffset = 0;
+
     for (const entity of validEntities) {
       const { offset, length, className } = entity;
       
-      // Извлекаем текст entity
+      // Skip entities that start before the last processed position (overlapping)
+      if (offset < lastOffset) {
+        continue;
+      }
+
+      // Add text before this entity
+      if (offset > lastOffset) {
+        result += this._escapeHTML(text.substring(lastOffset, offset));
+      }
+
+      // Extract entity text
       const entityText = text.substring(offset, offset + length);
       const escapedText = this._escapeHTML(entityText);
       
-      // Получаем HTML обертку для данного типа entity
+      // Apply formatting based on entity type
       const htmlWrapper = this._entityToHtmlMap[className];
-      
-      let replacement;
       if (htmlWrapper) {
-        replacement = htmlWrapper(escapedText, entity);
+        try {
+          result += htmlWrapper(escapedText, entity);
+        } catch (error) {
+          // If formatting fails, just use escaped text
+          result += escapedText;
+        }
       } else {
-        // Для неизвестных типов просто экранируем
-        replacement = escapedText;
+        result += escapedText;
       }
-      
-      // Заменяем в результирующей строке
-      result = result.substring(0, offset) + replacement + result.substring(offset + length);
+
+      lastOffset = offset + length;
     }
 
-    // Экранируем оставшиеся HTML символы в неформатированных частях
-    return this._escapeHTMLSimple(result);
+    // Add remaining text
+    if (lastOffset < text.length) {
+      result += this._escapeHTML(text.substring(lastOffset));
+    }
+
+    return result;
   }
 
   /**
@@ -162,49 +183,6 @@ class MessageFormatter {
       .replace(/&/g, '&amp;')
       .replace(/</g, '&lt;')
       .replace(/>/g, '&gt;');
-  }
-
-  /**
-   * Упрощенное экранирование HTML символов вне тегов
-   * @param {string} text - Текст с HTML тегами
-   * @returns {string} - Экранированный текст
-   */
-  _escapeHTMLSimple(text) {
-    if (!text) return '';
-    
-    let result = '';
-    let inTag = false;
-    
-    for (let i = 0; i < text.length; i++) {
-      const char = text[i];
-      
-      if (char === '<') {
-        inTag = true;
-        result += char;
-      } else if (char === '>') {
-        inTag = false;
-        result += char;
-      } else if (!inTag && char === '&' && !this._isEscapedChar(text, i)) {
-        result += '&amp;';
-      } else {
-        result += char;
-      }
-    }
-    
-    return result;
-  }
-
-  /**
-   * Проверяет, является ли символ & уже экранированным
-   * @param {string} text - Весь текст
-   * @param {number} index - Индекс символа &
-   * @returns {boolean} - true если символ уже экранирован
-   */
-  _isEscapedChar(text, index) {
-    const remaining = text.substring(index);
-    return remaining.startsWith('&amp;') || 
-           remaining.startsWith('&lt;') || 
-           remaining.startsWith('&gt;');
   }
 
   /**
