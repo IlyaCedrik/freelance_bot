@@ -144,6 +144,7 @@ bot.command('help', startHandler.help);
 // Bot actions - бизнес-логика
 bot.action(/^subscribe_(.+)$/, subscriptionHandler.subscribe);
 bot.action(/^unsubscribe_(.+)$/, subscriptionHandler.unsubscribe);
+bot.action(/^trial_(.+)$/, subscriptionHandler.activateTrial);
 bot.action(/^pay_(.+)$/, paymentHandler.createInvoice);
 bot.action(/^cancel_subscription_(.+)$/, subscriptionHandler.confirmCancelSubscription);
 bot.action(/^confirm_cancel_(.+)$/, subscriptionHandler.cancelSubscriptionFinal);

@@ -3,6 +3,7 @@ import Subscription from '../../database/models/Subscription.js';
 import User from '../../database/models/User.js';
 import { categoriesKeyboard } from '../keyboards/categories.js';
 import { subscriptionKeyboard } from '../keyboards/subscription.js';
+import { trialChoiceKeyboard } from '../keyboards/trial.js';
 import messageManager from '../utils/messageManager.js';
 import { supabase } from '../../config/supabase.js';
 
@@ -61,17 +62,37 @@ const subscribe = async (ctx) => {
       return messageManager.sendMessage(ctx, '✅ Вы уже подписаны на эту категорию');
     }
 
+    // Проверяем, использовал ли пользователь пробный период для этой категории
+    const hasUsedTrial = await Subscription.hasUserUsedTrial(user.id, categoryId);
     const price = (category.price / 100).toFixed(0);
-    const message = `
+
+    if (!hasUsedTrial) {
+      // Новый пользователь - показываем опции trial
+      const message = `
+📂 Подписка на: ${category.name}
+💰 Стоимость: ${price}₽ в месяц
+
+${category.description || ''}
+
+🎁 Как новый пользователь, вы можете активировать БЕСПЛАТНЫЙ пробный день!
+
+Выберите действие:
+      `;
+
+      await messageManager.sendMessage(ctx, message, trialChoiceKeyboard(categoryId));
+    } else {
+      // Пользователь уже использовал trial - показываем только платную подписку
+      const message = `
 📂 Подписка на: ${category.name}
 💰 Стоимость: ${price}₽ в месяц
 
 ${category.description || ''}
 
 Нажмите "Оплатить" для продолжения:
-    `;
+      `;
 
-    await messageManager.sendMessage(ctx, message, subscriptionKeyboard(categoryId));
+      await messageManager.sendMessage(ctx, message, subscriptionKeyboard(categoryId));
+    }
   } catch (error) {
     console.error('Subscribe error:', error);
     await messageManager.sendMessage(ctx, '❌ Ошибка при оформлении подписки');
@@ -213,6 +234,78 @@ const cancelSubscriptionFinal = async (ctx) => {
   }
 };
 
+// Новый обработчик для активации пробного дня
+const activateTrial = async (ctx) => {
+  try {
+    const categoryId = ctx.match[1];
+    const user = await User.findByTelegramId(ctx.from.id);
+    const category = await Category.findById(categoryId);
+
+    if (!user || !category) {
+      return messageManager.sendMessage(ctx, '❌ Данные не найдены');
+    }
+
+    // Проверяем, есть ли уже активная подписка
+    const isSubscribed = await Subscription.isUserSubscribed(user.id, categoryId);
+    if (isSubscribed) {
+      return messageManager.sendMessage(ctx, '✅ Вы уже подписаны на эту категорию');
+    }
+
+    // Проверяем, использовал ли пользователь уже пробный период
+    const hasUsedTrial = await Subscription.hasUserUsedTrial(user.id, categoryId);
+    if (hasUsedTrial) {
+      const price = (category.price / 100).toFixed(0);
+      const message = `
+❌ Вы уже использовали пробный период для категории "${category.name}"
+
+💰 Стоимость подписки: ${price}₽ в месяц
+
+Нажмите "Оплатить" для оформления платной подписки:
+      `;
+      
+      return messageManager.sendMessage(ctx, message, subscriptionKeyboard(categoryId));
+    }
+
+    // Создаем пробную подписку
+    await Subscription.createTrialSubscription(user.id, categoryId);
+
+    const expiresAt = new Date();
+    expiresAt.setDate(expiresAt.getDate() + 1);
+
+    const successMessage = `
+🎉 Пробный день успешно активирован!
+
+📂 Категория: ${category.name}
+⏰ Действует до: ${expiresAt.toLocaleDateString('ru-RU')} в ${expiresAt.toLocaleTimeString('ru-RU', { hour: '2-digit', minute: '2-digit' })}
+
+💡 В течение пробного дня вы будете получать все уведомления по этой категории.
+
+После окончания пробного периода вы сможете оформить платную подписку.
+
+Приятного использования! 🚀
+    `;
+
+    const { Markup } = await import('telegraf');
+    const keyboard = Markup.inlineKeyboard([
+      [Markup.button.callback('📂 Другие категории', 'categories')],
+      [Markup.button.callback('🏠 Главное меню', 'main_menu')]
+    ]);
+
+    await messageManager.editMessage(ctx, successMessage, keyboard);
+
+    console.log(`Trial activated: User ${user.id}, Category ${categoryId}, Expires: ${expiresAt}`);
+
+  } catch (error) {
+    console.error('Activate trial error:', error);
+    
+    if (error.message.includes('уже использовал пробный период')) {
+      await messageManager.sendMessage(ctx, '❌ Вы уже использовали пробный период для этой категории');
+    } else {
+      await messageManager.sendMessage(ctx, '❌ Ошибка при активации пробного дня. Попробуйте позже.');
+    }
+  }
+};
+
 const mySubscriptions = async (ctx) => {
   try {
     const user = await User.findByTelegramId(ctx.from.id);
@@ -276,5 +369,6 @@ export default {
   unsubscribe,
   mySubscriptions,
   confirmCancelSubscription,
-  cancelSubscriptionFinal
+  cancelSubscriptionFinal,
+  activateTrial
 }; 
