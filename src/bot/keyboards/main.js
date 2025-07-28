@@ -4,9 +4,8 @@ import User from '../../database/models/User.js';
 export const createMainKeyboard = async (telegramId) => {
   const buttons = [
     [Markup.button.callback('📂 Категории', 'categories')],
-    [Markup.button.callback('📋 Мои подписки', 'my_subscriptions')],
+    [Markup.button.callback('💰 Реферальная программа', 'referral_program')],
     [Markup.button.callback('👤 Личный кабинет', 'profile')],
-    [Markup.button.callback('⚙️ Настройки', 'settings')]
   ];
 
   // Добавляем кнопку админ-панели для администраторов
@@ -23,11 +22,3 @@ export const createMainKeyboard = async (telegramId) => {
 
   return Markup.inlineKeyboard(buttons);
 };
-
-// Оставляем статическую версию для обратной совместимости
-export const mainKeyboard = Markup.inlineKeyboard([
-  [Markup.button.callback('📂 Категории', 'categories')],
-  [Markup.button.callback('📋 Мои подписки', 'my_subscriptions')],
-  [Markup.button.callback('👤 Личный кабинет', 'profile')],
-  [Markup.button.callback('⚙️ Настройки', 'settings')]
-]); 

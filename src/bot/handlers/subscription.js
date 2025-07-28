@@ -24,12 +24,13 @@ const showCategories = async (ctx) => {
 
 ${categories.map(cat => {
   const isSubscribed = subscribedCategoryIds.includes(cat.id);
-  const status = isSubscribed ? '⭕' : '✅';
+  const status = isSubscribed ? '✅' : '🔒';
   const price = (cat.price / 100).toFixed(0);
+  
   return `${status} ${cat.name} - ${price}₽/мес`;
 }).join('\n')}
 
-💡 Выберите категорию для подписки или отписки:
+💡 Выберите категорию для подписки:
     `;
 
     // Проверяем, является ли это callback query (нажатие кнопки)
@@ -363,6 +364,22 @@ ${subscriptions.map(sub => {
   }
 };
 
+/**
+ * Обработчик для активации категории через промокод
+ * @param {Object} ctx - Контекст Telegraf
+ */
+const useCategoryPromoCode = async (ctx) => {
+  try {
+    const categoryId = ctx.match[1]; // Извлекаем categoryId из callback_data
+    
+    // Сохраняем categoryId в состоянии сцены и входим в сцену
+    await ctx.scene.enter('USE_CATEGORY_PROMO_CODE', { categoryId });
+  } catch (error) {
+    console.error('Use category promo code error:', error);
+    await messageManager.sendMessage(ctx, '❌ Ошибка при активации промокода');
+  }
+};
+
 export default {
   showCategories,
   subscribe,
@@ -370,5 +387,6 @@ export default {
   mySubscriptions,
   confirmCancelSubscription,
   cancelSubscriptionFinal,
-  activateTrial
+  activateTrial,
+  useCategoryPromoCode
 }; 

@@ -338,7 +338,14 @@ const promoRequestScene = new Scenes.WizardScene(
         );
 
         // Уведомляем администраторов о новом запросе
-        await notifyAdminsAboutNewRequest(request, user);
+        try {
+          console.log('🔔 Отправляем уведомления администраторам...');
+          await notifyAdminsAboutNewRequest(request, user);
+          console.log('✅ Уведомления администраторам отправлены');
+        } catch (notifyError) {
+          console.error('❌ Ошибка при отправке уведомлений администраторам:', notifyError);
+          // Не прерываем основной процесс из-за ошибки уведомлений
+        }
 
         console.log(`✅ Запрос на промокод ${promoCode} создан пользователем ${ctx.from.id}`);
 
@@ -375,13 +382,27 @@ promoRequestScene.action('cancel_promo_request', async (ctx) => {
 // Функция уведомления администраторов
 async function notifyAdminsAboutNewRequest(request, user) {
   try {
+    console.log('📋 Начинаем процесс уведомления администраторов');
+    console.log('📦 Request data:', { id: request.id, code: request.requested_code });
+    console.log('👤 User data:', { id: user.id, telegram_id: user.telegram_id });
+
     // Получаем всех администраторов
-    const { data: admins } = await supabase
+    const { data: admins, error: adminError } = await supabase
       .from('users')
       .select('telegram_id, first_name')
       .eq('role', 'admin');
 
-    if (!admins || admins.length === 0) return;
+    if (adminError) {
+      console.error('❌ Ошибка при получении списка администраторов:', adminError);
+      throw adminError;
+    }
+
+    console.log(`👨‍💼 Найдено администраторов: ${admins?.length || 0}`);
+
+    if (!admins || admins.length === 0) {
+      console.log('⚠️ Администраторы не найдены');
+      return;
+    }
 
     const userName = user.first_name || user.username || 'Пользователь';
     const notificationMessage = `
@@ -399,16 +420,27 @@ async function notifyAdminsAboutNewRequest(request, user) {
 Используйте /admin для обработки запросов.
     `;
 
+    console.log('📝 Сообщение подготовлено, отправляем администраторам...');
+
+    // Проверяем, что notificationService настроен
+    if (!notificationService || !notificationService.bot) {
+      console.error('❌ NotificationService не настроен!');
+      throw new Error('NotificationService not configured');
+    }
+
     // Отправляем уведомления всем администраторам
     for (const admin of admins) {
       try {
+        console.log(`📤 Отправляем уведомление администратору ${admin.telegram_id}`);
         await notificationService.sendAdminNotification(admin.telegram_id, notificationMessage);
+        console.log(`✅ Уведомление отправлено администратору ${admin.telegram_id}`);
       } catch (error) {
-        console.error(`Error notifying admin ${admin.telegram_id}:`, error);
+        console.error(`❌ Ошибка отправки администратору ${admin.telegram_id}:`, error);
       }
     }
   } catch (error) {
-    console.error('Error notifying admins:', error);
+    console.error('❌ Общая ошибка при уведомлении администраторов:', error);
+    throw error; // Пробрасываем ошибку наверх для более детальной диагностики
   }
 }
 
