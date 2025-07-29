@@ -106,16 +106,12 @@ const categoryPromoCodeScene = new Scenes.WizardScene(
         // Успешное применение промокода
         let responseMessage = `✅ Промокод "${promoCode}" успешно применен!`;
         
-        if (result.bonusDays > 0) {
-          // Если промокод дает дополнительные дни, активируем подписку
-          const subscriptionEnd = new Date();
-          subscriptionEnd.setDate(subscriptionEnd.getDate() + result.bonusDays);
-          
-          await Subscription.create({
-            userId: user.id,
-            categoryId: categoryId,
-            subscriptionEnd: subscriptionEnd
-          });
+                 if (result.bonusDays > 0) {
+           // Если промокод дает дополнительные дни, активируем подписку
+           const subscriptionEnd = new Date();
+           subscriptionEnd.setDate(subscriptionEnd.getDate() + result.bonusDays);
+           
+           await Subscription.create(user.id, categoryId, subscriptionEnd, false);
           
           responseMessage += `\n\n🎁 Вы получили ${result.bonusDays} дней бесплатного доступа к категории "${category.name}"!`;
           responseMessage += `\n📅 Подписка активна до: ${subscriptionEnd.toLocaleDateString('ru-RU')}`;

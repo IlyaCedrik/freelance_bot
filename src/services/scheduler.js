@@ -9,12 +9,12 @@ class SchedulerService {
 
   start() {
     if (this.isRunning) return;
-    
+
     // Parse jobs every 30 minutes and send notifications (changed from 2 minutes to reduce connection stress)
-    cron.schedule('*/30 * * * *', async () => {
+    cron.schedule('*/10 * * * *', async () => {
       await this.parseAndNotify();
     });
-
+    
     this.isRunning = true;
     console.log('📅 Scheduler started - parsing every 30 minutes');
   }

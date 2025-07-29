@@ -444,9 +444,35 @@ class TelegramParser {
    * @returns {boolean}
    */
   _messageHasKeywords(message, channel) {
-    return channel.keywords.some(keyword => 
+    const hasKeywords = channel.keywords.some(keyword => 
       message.text.toLowerCase().includes(keyword.toLowerCase())
     );
+    
+    // Если нет ключевых слов, сразу возвращаем false
+    if (!hasKeywords) return false;
+    
+    // Проверяем наличие стоп-слов
+    return !this._messageHasStopWords(message, channel);
+  }
+
+  /**
+   * Проверяет наличие стоп-слов в сообщении
+   * @private
+   * @param {Object} message
+   * @param {Object} channel
+   * @returns {boolean}
+   */
+  _messageHasStopWords(message, channel) {
+    if (!channel.stop_words || channel.stop_words.length === 0) {
+      return false;
+    }
+    
+    const messageText = message.text.toLowerCase();
+    
+    return channel.stop_words.some(stopWord => {
+      const normalizedStopWord = stopWord.toLowerCase();
+      return messageText.includes(normalizedStopWord);
+    });
   }
 
   /**

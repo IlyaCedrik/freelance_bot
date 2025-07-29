@@ -5,7 +5,7 @@
 /**
  * Порт по умолчанию для сервера
  */
-export const DEFAULT_PORT = 3000;
+export const DEFAULT_PORT = 3003;
 
 /**
  * Процессы для завершения работы

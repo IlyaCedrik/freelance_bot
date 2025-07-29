@@ -155,6 +155,27 @@ class ParsingChannel {
 
     return grouped;
   }
+
+  /**
+   * Обновляет стоп-слова для канала
+   * @param {string} id - ID канала
+   * @param {Array<string>} stopWords - Массив стоп-слов
+   * @returns {Promise<Object>} Обновленный канал
+   */
+  static async updateStopWords(id, stopWords) {
+    const { data, error } = await supabase
+      .from('parsing_channels')
+      .update({ stop_words: stopWords || [] })
+      .eq('id', id)
+      .select(`
+        *,
+        categories(*)
+      `)
+      .single();
+
+    if (error) throw error;
+    return data;
+  }
 }
 
 export default ParsingChannel; 

@@ -29,8 +29,6 @@ const showSettings = async (ctx) => {
 
     const keyboard = Markup.inlineKeyboard([
       [Markup.button.callback('📊 Мои подписки', 'show_subscriptions')],
-      [Markup.button.callback('🔒 Политика конфиденциальности', 'show_privacy')],
-      [Markup.button.callback('📤 Экспорт данных', 'export_data')],
       [Markup.button.callback('🗑 Удалить аккаунт', 'delete_account_confirm')],
       [Markup.button.callback('↩️ Назад', 'back_to_main')]
     ]);
