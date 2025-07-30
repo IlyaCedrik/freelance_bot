@@ -74,7 +74,21 @@ const createInvoice = async (ctx) => {
       need_email: true,
       send_email_to_provider: true,
       need_phone_number: false,
-      is_flexible: false
+      provider_data : {
+        receipt: {
+          items: [{
+              description: 'Подписка на месяц',
+              quantity: 1,
+              amount: {
+                value: priceAmount / 100,
+                currency: "RUB"
+              },
+              vat_code: 1,
+              payment_mode: 'full_payment',
+              payment_subject: 'commodity'
+          }]
+        },
+      }
     };
 
     console.log('📄 Sending invoice with data:', JSON.stringify(invoiceData, null, 2));
@@ -113,7 +127,8 @@ const preCheckout = async (ctx) => {
       from: ctx.from.id,
       payload: ctx.preCheckoutQuery.invoice_payload,
       currency: ctx.preCheckoutQuery.currency,
-      total_amount: ctx.preCheckoutQuery.total_amount
+      total_amount: ctx.preCheckoutQuery.total_amount,
+      email: ctx.update.pre_checkout_query.order_info.email,
     });
 
     // Verify payment exists in database
@@ -132,7 +147,7 @@ const preCheckout = async (ctx) => {
     }
 
     console.log('✅ Payment verified, approving checkout');
-    await ctx.answerPreCheckoutQuery(true);
+    await ctx.answerPreCheckoutQuery(true, 'Error');
   } catch (error) {
     console.error('❌ Pre-checkout error:', error);
     await ctx.answerPreCheckoutQuery(false, 'Ошибка при обработке платежа');
