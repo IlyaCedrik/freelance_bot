@@ -71,7 +71,8 @@ const createInvoice = async (ctx) => {
         label: 'Подписка на месяц',
         amount: priceAmount
       }],
-      need_email: false,
+      need_email: true,
+      send_email_to_provider: true,
       need_phone_number: false,
       is_flexible: false
     };
@@ -150,8 +151,20 @@ const successfulPayment = async (ctx) => {
       totalAmount: payment.total_amount,
       currency: payment.currency,
       telegramChargeId: payment.telegram_payment_charge_id,
-      providerChargeId: payment.provider_payment_charge_id
+      providerChargeId: payment.provider_payment_charge_id,
+      email: payment.order_info?.email
     });
+
+    // Сохраняем email пользователя если он был предоставлен
+    if (payment.order_info?.email) {
+      try {
+        await User.updateEmail(ctx.from.id, payment.order_info.email);
+        console.log('📧 User email updated:', payment.order_info.email);
+      } catch (emailError) {
+        console.error('❌ Error updating user email:', emailError);
+        // Не прерываем основной процесс из-за ошибки с email
+      }
+    }
 
     // Update payment status
     const { error: paymentError } = await supabase

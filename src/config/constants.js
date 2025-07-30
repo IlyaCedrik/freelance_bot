@@ -81,4 +81,4 @@ export const REGEX_PATTERNS = {
   REQUEST_DAYS: /^request_days_\d+$/,
   REQUEST_DISCOUNT: /^request_discount_\d+$/,
   REQUEST_LIMIT: /^request_limit_\d+$/
-}; 
+};

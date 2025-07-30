@@ -95,6 +95,18 @@ class User {
     if (error) throw error;
   }
 
+  static async updateEmail(telegramId, email) {
+    const { error } = await supabase
+      .from('users')
+      .update({ 
+        email,
+        updated_at: new Date().toISOString()
+      })
+      .eq('telegram_id', telegramId);
+
+    if (error) throw error;
+  }
+
   static async getAllAdmins() {
     const { data, error } = await supabase
       .from('users')
