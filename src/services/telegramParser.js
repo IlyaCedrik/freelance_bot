@@ -257,11 +257,22 @@ class TelegramParser {
       }
 
       console.log(`📋 Parsing ${this.channels.length} channels...`);
+      
+      // Очищаем старые записи о сообщениях перед началом парсинга
+      const cleanedCount = await databaseService.cleanupOldMessages();
+      if (cleanedCount > 0) {
+        console.log(`🧹 Cleaned up ${cleanedCount} old message records`);
+      }
+      
       const totalJobs = await this._parseChannelsSequentially();
       
       const endTime = new Date();
       const duration = Math.round((endTime - startTime) / 1000);
       console.log(`📡 Telegram channels parsing completed: ${totalJobs} jobs found in ${duration}s`);
+      
+      // Показываем статистику дедупликации
+      const stats = await databaseService.getDeduplicationStats();
+      console.log(`📊 Deduplication stats: ${stats.total_messages} total, ${stats.duplicate_messages} duplicates prevented`);
       
       return totalJobs;
     } catch (error) {
@@ -416,6 +427,7 @@ class TelegramParser {
    */
   async _processChannelMessages(messages, channel) {
     let jobsCount = 0;
+    let duplicatesSkipped = 0;
 
     for (const message of messages) {
       if (!message.text) continue;
@@ -423,14 +435,36 @@ class TelegramParser {
       const hasKeywords = this._messageHasKeywords(message, channel);
       if (!hasKeywords) continue;
 
+      // Проверяем, не является ли сообщение дублем
+      const isDuplicate = await databaseService.isMessageAlreadyProcessed(message.text);
+      if (isDuplicate) {
+        duplicatesSkipped++;
+        console.log(`🔄 Дубль пропущен из канала ${channel.name}: ${message.text.substring(0, 50)}...`);
+        continue;
+      }
+
       const jobData = this.extractJobData(message, channel);
       
       if (jobData) {
         const sentCount = await this.sendJobToSubscribers(jobData);
-        if (sentCount > 0) jobsCount++;
+        if (sentCount > 0) {
+          jobsCount++;
+          
+          // Помечаем сообщение как обработанное
+          await databaseService.markMessageAsProcessed(
+            message.text,
+            channel.username,
+            channel.categories.slug,
+            sentCount
+          );
+        }
       }
 
       await this.sleep(DELAYS.BETWEEN_MESSAGES);
+    }
+
+    if (duplicatesSkipped > 0) {
+      console.log(`📊 Пропущено дублей в канале ${channel.name}: ${duplicatesSkipped}`);
     }
 
     return jobsCount;

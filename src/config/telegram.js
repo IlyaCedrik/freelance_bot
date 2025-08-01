@@ -6,7 +6,7 @@ const telegramConfig = {
   
   settings: {
     messageLimit: 100, // Увеличено для получения всех сообщений за полчаса
-    timeWindow: 0.5, // Полчаса - получаем сообщения за последние 30 минут
+    timeWindow: 0.1, // Полчаса - получаем сообщения за последние 30 минут
     pauseBetweenChannels: 3000, // Увеличено с 2000 до 3000мс для снижения нагрузки
     pauseBetweenMessages: 150, // Добавлено для контроля скорости обработки
     deviceModel: 'FreelanceBot',
